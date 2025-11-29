@@ -473,6 +473,44 @@ def format_metrics(metrics: Dict[str, float]) -> str:
     return "\n".join(lines)
 
 
+def plot_strategy(result: BacktestResult, outfile: str = "ern_momentum_strategy.png") -> str | None:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib not installed; skipping plot.")
+        return None
+
+    base_wealth = result.wealth
+    vt_info = result.extras.get("vol_target", {})
+    vt_monthly = vt_info.get("monthly_returns") if isinstance(vt_info, dict) else None
+    vt_wealth = None
+    if vt_monthly is not None and not vt_monthly.empty:
+        vt_wealth = (1.0 + vt_monthly).cumprod()
+        common = vt_wealth.index.intersection(base_wealth.index)
+        vt_wealth = vt_wealth.loc[common]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(base_wealth.index, base_wealth.values, label="Momentum strategy", linewidth=1.5)
+    if vt_wealth is not None and not vt_wealth.empty:
+        ax.plot(
+            vt_wealth.index,
+            vt_wealth.values,
+            label="Vol-target 50% (30d)",
+            linestyle="--",
+            linewidth=1.2,
+        )
+    ax.set_title("ERN Momentum Strategy Cumulative Wealth")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Cumulative wealth (log scale)")
+    ax.set_yscale("log")
+    ax.legend()
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(outfile, dpi=150)
+    plt.close(fig)
+    return outfile
+
+
 def main() -> None:
     result = run_backtest()
     start, end = result.extras["coverage"]
@@ -497,6 +535,9 @@ def main() -> None:
                 f"median {scaling.median():.2f}, "
                 f"95th pct {scaling.quantile(0.95):.2f})"
             )
+    plot_path = plot_strategy(result)
+    if plot_path:
+        print(f"\nSaved plot to {plot_path}")
 
 
 if __name__ == "__main__":
