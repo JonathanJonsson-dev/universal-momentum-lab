@@ -535,6 +535,7 @@ def main() -> None:
                 f"median {scaling.median():.2f}, "
                 f"95th pct {scaling.quantile(0.95):.2f})"
             )
+            print(f"Latest overlay leverage: {scaling.iloc[-1]:.2f}x")
     plot_path = plot_strategy(result)
     if plot_path:
         print(f"\nSaved plot to {plot_path}")
