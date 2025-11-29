@@ -495,7 +495,7 @@ def plot_strategy(result: BacktestResult, outfile: str = "ern_momentum_strategy.
         ax.plot(
             vt_wealth.index,
             vt_wealth.values,
-            label="Vol-target 50% (30d)",
+            label="Vol-target 20% (30d)",
             linestyle="--",
             linewidth=1.2,
         )
@@ -503,6 +503,69 @@ def plot_strategy(result: BacktestResult, outfile: str = "ern_momentum_strategy.
     ax.set_xlabel("Date")
     ax.set_ylabel("Cumulative wealth (log scale)")
     ax.set_yscale("log")
+    ax.legend()
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(outfile, dpi=150)
+    plt.close(fig)
+    return outfile
+
+
+def plot_allocations(result: BacktestResult, outfile: str = "ern_momentum_allocations.png") -> str | None:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib not installed; skipping allocation plot.")
+        return None
+
+    weights = result.weights.copy()
+    if weights.empty:
+        print("No weights available; skipping allocation plot.")
+        return None
+    weights = weights[["EQUITY", "BONDS", "GOLD", "CASH"]]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.stackplot(weights.index, [weights[col] for col in weights.columns], labels=weights.columns)
+    ax.set_title("Asset Allocation Over Time")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Portfolio weight")
+    ax.set_ylim(0, 1)
+    ax.legend(loc="upper left")
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(outfile, dpi=150)
+    plt.close(fig)
+    return outfile
+
+
+def plot_drawdowns(result: BacktestResult, outfile: str = "ern_momentum_drawdowns.png") -> str | None:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib not installed; skipping drawdown plot.")
+        return None
+
+    base_wealth = result.wealth
+    base_dd = base_wealth / base_wealth.cummax() - 1.0
+
+    vt_info = result.extras.get("vol_target", {})
+    vt_monthly = vt_info.get("monthly_returns") if isinstance(vt_info, dict) else None
+    vt_dd = None
+    if vt_monthly is not None and not vt_monthly.empty:
+        vt_wealth = (1.0 + vt_monthly).cumprod()
+        vt_dd = vt_wealth / vt_wealth.cummax() - 1.0
+        common = vt_dd.index.intersection(base_dd.index)
+        vt_dd = vt_dd.loc[common]
+        base_dd = base_dd.loc[common] if not base_dd.empty else base_dd
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(base_dd.index, base_dd.values, label="Momentum strategy", linewidth=1.5)
+    if vt_dd is not None and not vt_dd.empty:
+        ax.plot(vt_dd.index, vt_dd.values, label="Vol-target 50% (30d)", linestyle="--", linewidth=1.2)
+    ax.set_title("Drawdowns Over Time")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Drawdown")
+    ax.set_ylim(-1, 0.05)
     ax.legend()
     ax.grid(alpha=0.3)
     plt.tight_layout()
@@ -539,6 +602,12 @@ def main() -> None:
     plot_path = plot_strategy(result)
     if plot_path:
         print(f"\nSaved plot to {plot_path}")
+    alloc_path = plot_allocations(result)
+    if alloc_path:
+        print(f"Saved allocation plot to {alloc_path}")
+    dd_path = plot_drawdowns(result)
+    if dd_path:
+        print(f"Saved drawdown plot to {dd_path}")
 
 
 if __name__ == "__main__":
