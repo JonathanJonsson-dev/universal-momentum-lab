@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
@@ -27,14 +28,16 @@ from datetime import datetime
 
 
 START_DATE = "1900-01-01"
-END_DATE = datetime.today().strftime('%Y-%m-%d')
+END_DATE = datetime.today().strftime("%Y-%m-%d")
 HORIZONS = [8, 9, 10]
 BASE_WEIGHTS = {"EQUITY": 0.70, "BONDS": 0.20, "GOLD": 0.10}
 EXPENSE_RATIOS = {"EQUITY": 0.0003, "BONDS": 0.0015, "GOLD": 0.0009, "CASH": 0.0009}
 TRANSACTION_COST = 0.0003  # 0.03% per side on traded weight
-VOL_TARGET = 0.50
+VOL_TARGET = 0.20
 VOL_WINDOW_DAYS = 30
 VOL_MAX_LEVERAGE = 10.0
+OUTPUT_DIR = Path(__file__).resolve().parent / "plots"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Prefer total-return style tickers where possible; fall back to ETFs.
 ASSET_CONFIG: Dict[str, Dict[str, Iterable[str]]] = {
@@ -473,12 +476,14 @@ def format_metrics(metrics: Dict[str, float]) -> str:
     return "\n".join(lines)
 
 
-def plot_strategy(result: BacktestResult, outfile: str = "ern_momentum_strategy.png") -> str | None:
+def plot_strategy(result: BacktestResult, outfile: Path | None = None) -> Path | None:
     try:
         import matplotlib.pyplot as plt
     except ImportError:
         print("matplotlib not installed; skipping plot.")
         return None
+
+    outfile = OUTPUT_DIR / "ern_momentum_strategy.png" if outfile is None else outfile
 
     base_wealth = result.wealth
     vt_info = result.extras.get("vol_target", {})
@@ -511,12 +516,14 @@ def plot_strategy(result: BacktestResult, outfile: str = "ern_momentum_strategy.
     return outfile
 
 
-def plot_allocations(result: BacktestResult, outfile: str = "ern_momentum_allocations.png") -> str | None:
+def plot_allocations(result: BacktestResult, outfile: Path | None = None) -> Path | None:
     try:
         import matplotlib.pyplot as plt
     except ImportError:
         print("matplotlib not installed; skipping allocation plot.")
         return None
+
+    outfile = OUTPUT_DIR / "ern_momentum_allocations.png" if outfile is None else outfile
 
     weights = result.weights.copy()
     if weights.empty:
@@ -538,12 +545,14 @@ def plot_allocations(result: BacktestResult, outfile: str = "ern_momentum_alloca
     return outfile
 
 
-def plot_drawdowns(result: BacktestResult, outfile: str = "ern_momentum_drawdowns.png") -> str | None:
+def plot_drawdowns(result: BacktestResult, outfile: Path | None = None) -> Path | None:
     try:
         import matplotlib.pyplot as plt
     except ImportError:
         print("matplotlib not installed; skipping drawdown plot.")
         return None
+
+    outfile = OUTPUT_DIR / "ern_momentum_drawdowns.png" if outfile is None else outfile
 
     base_wealth = result.wealth
     base_dd = base_wealth / base_wealth.cummax() - 1.0
@@ -561,7 +570,7 @@ def plot_drawdowns(result: BacktestResult, outfile: str = "ern_momentum_drawdown
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(base_dd.index, base_dd.values, label="Momentum strategy", linewidth=1.5)
     if vt_dd is not None and not vt_dd.empty:
-        ax.plot(vt_dd.index, vt_dd.values, label="Vol-target 50% (30d)", linestyle="--", linewidth=1.2)
+        ax.plot(vt_dd.index, vt_dd.values, label="Vol-target 20% (30d)", linestyle="--", linewidth=1.2)
     ax.set_title("Drawdowns Over Time")
     ax.set_xlabel("Date")
     ax.set_ylabel("Drawdown")
