@@ -23,10 +23,11 @@ from typing import Dict, Iterable, List, Tuple
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from datetime import datetime
 
 
 START_DATE = "1900-01-01"
-END_DATE = "2025-11-29"
+END_DATE = datetime.today().strftime('%Y-%m-%d')
 HORIZONS = [8, 9, 10]
 BASE_WEIGHTS = {"EQUITY": 0.70, "BONDS": 0.20, "GOLD": 0.10}
 EXPENSE_RATIOS = {"EQUITY": 0.0003, "BONDS": 0.0015, "GOLD": 0.0009, "CASH": 0.0009}
