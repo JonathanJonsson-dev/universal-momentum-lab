@@ -33,7 +33,7 @@ HORIZONS = [8, 9, 10]
 BASE_WEIGHTS = {"EQUITY": 0.70, "BONDS": 0.20, "GOLD": 0.10}
 EXPENSE_RATIOS = {"EQUITY": 0.0003, "BONDS": 0.0015, "GOLD": 0.0009, "CASH": 0.0009}
 TRANSACTION_COST = 0.0003  # 0.03% per side on traded weight
-VOL_TARGET = 0.20
+VOL_TARGET = 0.50
 VOL_WINDOW_DAYS = 30
 VOL_MAX_LEVERAGE = 10.0
 OUTPUT_DIR = Path(__file__).resolve().parent / "plots"
@@ -500,7 +500,7 @@ def plot_strategy(result: BacktestResult, outfile: Path | None = None) -> Path |
         ax.plot(
             vt_wealth.index,
             vt_wealth.values,
-            label="Vol-target 20% (30d)",
+            label="Vol-target 50% (30ud)",
             linestyle="--",
             linewidth=1.2,
         )
@@ -570,7 +570,7 @@ def plot_drawdowns(result: BacktestResult, outfile: Path | None = None) -> Path 
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(base_dd.index, base_dd.values, label="Momentum strategy", linewidth=1.5)
     if vt_dd is not None and not vt_dd.empty:
-        ax.plot(vt_dd.index, vt_dd.values, label="Vol-target 20% (30d)", linestyle="--", linewidth=1.2)
+        ax.plot(vt_dd.index, vt_dd.values, label="Vol-target 50% (30d)", linestyle="--", linewidth=1.2)
     ax.set_title("Drawdowns Over Time")
     ax.set_xlabel("Date")
     ax.set_ylabel("Drawdown")
@@ -597,7 +597,7 @@ def main() -> None:
     print(result.weights.tail().round(3))
     vt_info = result.extras.get("vol_target")
     if vt_info:
-        print("\n===== 30-Day Vol Target Overlay (20% target) =====")
+        print("\n===== 30-Day Vol Target Overlay (50% target) =====")
         print(format_metrics(vt_info["metrics"]))
         scaling = vt_info["scaling"].dropna()
         if not scaling.empty:
