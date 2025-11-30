@@ -62,6 +62,32 @@ class BacktestResult:
     metrics: Dict[str, float]
     extras: Dict[str, object]
 
+def instrument_diversification_multiplier(num_instruments: int) -> float:
+    """Instrument diversification multiplier (Table 16) for a diversified basket.
+
+    Not intended for highly concentrated sets (e.g., many similar equity futures).
+    """
+    if num_instruments <= 0:
+        raise ValueError("Number of instruments must be positive.")
+
+    fixed_points = {
+        1: 1.00,
+        2: 1.20,
+        3: 1.48,
+        4: 1.56,
+        5: 1.70,
+        6: 1.90,
+        7: 2.10,
+    }
+    if num_instruments in fixed_points:
+        return fixed_points[num_instruments]
+    if 8 <= num_instruments <= 14:
+        return 2.20
+    if 15 <= num_instruments <= 24:
+        return 2.30
+    if 25 <= num_instruments <= 29:
+        return 2.40
+    return 2.50
 
 def download_single_ticker(
     ticker: str, start: str, end: str, auto_adjust: bool = True
