@@ -15,8 +15,9 @@ RISK_PARITY_WINDOW = 60  # trading days for vol estimate
 VOL_TARGET = 0.45  # 10% annualized target
 VOL_TARGET_WINDOW = 20  # lookback for realized vol of RP portfolio
 VOL_TARGET_MAX_LEV = 10.0
-BROWNE_TARGET_MULTIPLE = 2  # aim for +50% per campaign
-BROWNE_HORIZON_DAYS = 252
+STARTING_WEALTH = 850_000
+BROWNE_TARGET_MULTIPLE =  100_000_000 / STARTING_WEALTH #2  # aim for +50% per campaign
+BROWNE_HORIZON_DAYS = 252 * 10
 BROWNE_SIGMA_WINDOW = 60
 BROWNE_MAX_LEV = 10.0
 
