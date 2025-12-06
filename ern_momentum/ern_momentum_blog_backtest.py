@@ -309,7 +309,12 @@ def build_daily_strategy_returns(
 ) -> pd.Series:
     if monthly_weights.empty or daily_asset_returns.empty:
         return pd.Series(dtype=float)
-    weights_daily = monthly_weights.resample("D").ffill()
+    # Shift month-end weights to the first business day of the SAME month before forward-fill
+    shifted = monthly_weights.copy()
+    shifted.index = (
+        shifted.index.to_period("M").to_timestamp(how="start") + pd.offsets.BMonthBegin(0)
+    )
+    weights_daily = shifted.resample("D").ffill()
     common_index = daily_asset_returns.index.intersection(weights_daily.index)
     weights_daily = weights_daily.loc[common_index]
     daily_asset_returns = daily_asset_returns.loc[common_index]
@@ -331,6 +336,16 @@ def max_drawdown(wealth: pd.Series) -> float:
     running_max = wealth.cummax()
     drawdowns = wealth / running_max - 1.0
     return float(drawdowns.min()) if not drawdowns.empty else float("nan")
+
+
+def drop_incomplete_last_month(data: pd.DataFrame | pd.Series) -> pd.DataFrame | pd.Series:
+    """Remove the last row if it's a partial (in-progress) month."""
+    if data.empty:
+        return data
+    last_date = data.index[-1]
+    if getattr(last_date, "is_month_end", False):
+        return data
+    return data.iloc[:-1]
 
 
 def compute_metrics(
@@ -413,6 +428,9 @@ def run_backtest() -> BacktestResult:
 
     monthly_prices = daily_prices.resample("ME").last().dropna(how="any")
     monthly_cash_returns = daily_to_monthly_returns(daily_cash_returns)
+    # Drop in-progress month so weights use only completed months (blog timing).
+    monthly_prices = drop_incomplete_last_month(monthly_prices)
+    monthly_cash_returns = drop_incomplete_last_month(monthly_cash_returns)
     common_months = monthly_prices.index.intersection(monthly_cash_returns.index)
     monthly_prices = monthly_prices.loc[common_months]
     monthly_cash_returns = monthly_cash_returns.loc[common_months]
@@ -421,13 +439,15 @@ def run_backtest() -> BacktestResult:
     cash_returns = monthly_cash_returns.loc[asset_returns.index]
 
     momentum_scores = build_momentum_scores(monthly_prices, monthly_cash_returns)
-    momentum_scores = momentum_scores.loc[asset_returns.index]
-    momentum_scores = momentum_scores.shift(1).dropna()  # use prior month signal
+    momentum_scores = momentum_scores.loc[asset_returns.index].dropna()
 
-    asset_returns = asset_returns.loc[momentum_scores.index]
-    cash_returns = cash_returns.loc[momentum_scores.index]
+    weights = allocate_weights(momentum_scores)
+    # Apply a one-month lag: month-end signals set next month's weights.
+    weights = weights.shift(1).dropna()
 
-    weights = allocate_weights(momentum_scores).loc[momentum_scores.index]
+    asset_returns = asset_returns.loc[weights.index]
+    cash_returns = cash_returns.loc[weights.index]
+
     asset_returns, cash_returns = apply_expense_drag(asset_returns, cash_returns)
 
     portfolio_returns = compute_portfolio_returns(weights, asset_returns, cash_returns)
@@ -609,6 +629,35 @@ def plot_drawdowns(result: BacktestResult, outfile: Path | None = None) -> Path 
     return outfile
 
 
+def plot_scaling(result: BacktestResult, outfile: Path | None = None) -> Path | None:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib not installed; skipping scaling plot.")
+        return None
+
+    outfile = OUTPUT_DIR / "ern_momentum_vol_target_scaling.png" if outfile is None else outfile
+    vt_info = result.extras.get("vol_target", {})
+    scaling = vt_info.get("scaling") if isinstance(vt_info, dict) else None
+    if scaling is None or scaling.empty:
+        print("No vol-target scaling available; skipping scaling plot.")
+        return None
+    scaling = scaling.dropna()
+    if scaling.empty:
+        print("Scaling series empty after dropna; skipping scaling plot.")
+        return None
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    scaling.plot(ax=ax)
+    ax.set_title("Vol-Target Scaling (30d @ 50% target)")
+    ax.set_ylabel("Leverage")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(outfile, dpi=150)
+    plt.close(fig)
+    return outfile
+
+
 def main() -> None:
     result = run_backtest()
     start, end = result.extras["coverage"]
@@ -643,6 +692,9 @@ def main() -> None:
     dd_path = plot_drawdowns(result)
     if dd_path:
         print(f"Saved drawdown plot to {dd_path}")
+    scaling_path = plot_scaling(result)
+    if scaling_path:
+        print(f"Saved scaling plot to {scaling_path}")
 
 
 if __name__ == "__main__":
