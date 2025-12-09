@@ -314,11 +314,12 @@ def build_daily_strategy_returns(
     shifted.index = (
         shifted.index.to_period("M").to_timestamp(how="start") + pd.offsets.BMonthBegin(0)
     )
-    weights_daily = shifted.resample("D").ffill()
-    common_index = daily_asset_returns.index.intersection(weights_daily.index)
-    weights_daily = weights_daily.loc[common_index]
-    daily_asset_returns = daily_asset_returns.loc[common_index]
-    daily_cash_returns = daily_cash_returns.reindex(common_index).fillna(0.0)
+    weights_calendar = shifted.resample("D").ffill()
+    # Align to the daily return calendar so the final month forward-fills through month-end.
+    weights_daily = weights_calendar.reindex(daily_asset_returns.index, method="ffill")
+    weights_daily = weights_daily.dropna(how="all")
+    daily_asset_returns = daily_asset_returns.loc[weights_daily.index]
+    daily_cash_returns = daily_cash_returns.reindex(weights_daily.index).fillna(0.0)
     asset_cols = ["EQUITY", "BONDS", "GOLD"]
     strategy = (weights_daily[asset_cols] * daily_asset_returns[asset_cols]).sum(axis=1)
     strategy = strategy + weights_daily["CASH"] * daily_cash_returns
@@ -480,6 +481,7 @@ def run_backtest() -> BacktestResult:
         rf_returns=daily_cash_net,
         max_leverage=VOL_MAX_LEVERAGE,
     )
+    print(vt_scaling)
     vt_monthly = daily_to_monthly_returns(vt_daily)
     vt_monthly = vt_monthly.loc[cash_returns.index.intersection(vt_monthly.index)]
     vt_metrics = compute_metrics(vt_monthly, cash_returns)
