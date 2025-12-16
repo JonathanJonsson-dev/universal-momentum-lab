@@ -6,6 +6,7 @@ strategy's daily returns:
 * Online gradient descent on log-wealth.
 * Thompson sampling for Kelly sizing (normal-inverse-gamma posterior).
 * Simple 30-day rolling vol targeting to 50% annualized vol.
+* Universal mixture-of-experts over a leverage grid (Cover-style universal portfolio).
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import math
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Iterable, Tuple
 
 import numpy as np
 import pandas as pd
@@ -292,6 +293,61 @@ def simple_vol_target_overlay(
     return _to_result("30d Vol Target 50%", overlay, scaling, monthly_cash)
 
 
+def universal_mixture_overlay(
+    base_returns: pd.Series,
+    cash_returns: pd.Series,
+    monthly_cash: pd.Series,
+    leverage_grid: Iterable[float] = (0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0),
+    min_relative: float = 1e-6,
+) -> LeverageResult:
+    """Mix constant-leverage experts using a Cover-style universal portfolio."""
+    base_aligned, cash_aligned = base_returns.align(cash_returns, join="inner", fill_value=0.0)
+
+    leverages = sorted({float(level) for level in leverage_grid if math.isfinite(level)})
+    if len(leverages) == 0:
+        raise ValueError("leverage_grid must contain at least one finite leverage value.")
+
+    leverage_array = np.asarray(leverages, dtype=float)
+    expert_frames = []
+    for f in leverages:
+        label = f"{f:g}x"
+        overlay = f * base_aligned + (1.0 - f) * cash_aligned
+        overlay.name = label
+        expert_frames.append(overlay)
+
+    expert_returns = pd.concat(expert_frames, axis=1)
+    expert_relatives = (1.0 + expert_returns).clip(lower=min_relative)
+
+    wealth = np.ones(len(leverages), dtype=float) / float(len(leverages))
+    overlay_returns: list[float] = []
+    leverage_path: list[float] = []
+
+    for rel_row in expert_relatives.to_numpy(dtype=float):
+        weights = wealth / wealth.sum()
+        leverage_path.append(float(np.dot(weights, leverage_array)))
+        effective_returns = rel_row - 1.0
+        overlay_returns.append(float(np.dot(weights, effective_returns)))
+
+        wealth = wealth * rel_row
+        wealth_sum = wealth.sum()
+        if wealth_sum <= 0.0 or not math.isfinite(wealth_sum):
+            wealth = np.ones(len(leverages), dtype=float) / float(len(leverages))
+        else:
+            wealth /= wealth_sum
+
+    daily_overlay = pd.Series(
+        overlay_returns,
+        index=expert_returns.index,
+        name="universal_mixture_overlay",
+    )
+    leverage_series = pd.Series(
+        leverage_path,
+        index=expert_returns.index,
+        name="universal_mixture_f",
+    )
+    return _to_result("Universal Mixture (leverages)", daily_overlay, leverage_series, monthly_cash)
+
+
 def run_leverage_comparison() -> Tuple[Dict[str, LeverageResult], StrategyInputs]:
     inputs = prepare_strategy_inputs()
     base_leverage = pd.Series(1.0, index=inputs.daily_returns.index, name="base_f")
@@ -343,6 +399,13 @@ def run_leverage_comparison() -> Tuple[Dict[str, LeverageResult], StrategyInputs
         window=30,
         max_leverage=10.0,
     )
+    universal_mixture = universal_mixture_overlay(
+        inputs.daily_returns,
+        inputs.daily_cash,
+        inputs.monthly_cash,
+        leverage_grid=(0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0),
+        min_relative=1e-6,
+    )
 
     results = {
         "baseline": baseline,
@@ -350,6 +413,7 @@ def run_leverage_comparison() -> Tuple[Dict[str, LeverageResult], StrategyInputs
         "online_gradient": ogd,
         "thompson_kelly": ts,
         "vol_target": vt,
+        "universal_mixture": universal_mixture,
     }
     return results, inputs
 
