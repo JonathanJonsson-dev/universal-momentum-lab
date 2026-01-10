@@ -1,9 +1,10 @@
 """Backtest a GARCH vs VIX signal for trading VXX.
 
-Strategy from the slides:
+Strategy from the slides (long-only variant):
 * RV(t+1) is the GARCH-predicted realized volatility for the next period.
 * IV(t) is the current implied volatility (VIX).
-* If RV(t+1) - VIX(t) > 0, go long VXX; otherwise short VXX.
+* If RV(t+1) - VIX(t) > 0, go long VXX; otherwise hold cash.
+* Position size scales with signal strength, capped at full exposure.
 
 This implementation uses a rolling GARCH(1,1) fit on SPX log returns to
 forecast the next 21 trading days of volatility, compares it to VIX, and
@@ -36,6 +37,7 @@ ESTIMATION_WINDOW = 756  # ~3 years of daily data
 FORECAST_HORIZON = 21  # ~1 month
 UPDATE_FREQUENCY = 21  # re-estimate monthly
 TRANSACTION_COST = 0.0005  # 5 bps per unit traded
+SIGNAL_SCALE = 10.0  # signal points for full exposure
 OUTPUT_DIR = Path(__file__).resolve().parent / "plots"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -313,7 +315,7 @@ def run_backtest() -> BacktestResult:
     aligned = aligned.dropna()
 
     signal = aligned["predicted_vol"] - aligned["vix"]
-    position = pd.Series(np.where(signal > 0.0, 1.0, -1.0), index=signal.index)
+    position = (signal / SIGNAL_SCALE).clip(lower=0.0, upper=1.0)
     position = position.shift(1).fillna(0.0)
     turnover = position.diff().abs().fillna(0.0)
     strategy_returns = position * aligned["vxx_returns"] - turnover * TRANSACTION_COST
