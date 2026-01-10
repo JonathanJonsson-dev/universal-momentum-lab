@@ -35,7 +35,7 @@ EXPENSE_RATIOS = {"EQUITY": 0.0003, "BONDS": 0.0015, "GOLD": 0.0009, "CASH": 0.0
 TRANSACTION_COST = 0.0003  # 0.03% per side on traded weight
 VOL_TARGET = 0.50
 VOL_WINDOW_DAYS = 30
-VOL_MAX_LEVERAGE = 10.0
+VOL_MAX_LEVERAGE = 11.2
 OUTPUT_DIR = Path(__file__).resolve().parent / "plots"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -672,6 +672,10 @@ def main() -> None:
     print(format_metrics(result.metrics))
     print("\nMost recent weights:")
     print(result.weights.tail().round(3))
+    # Print the 20 last weights
+    print("\nLast 20 months of weights:")
+    print(result.weights.tail(200).round(3))
+    
     vt_info = result.extras.get("vol_target")
     if vt_info:
         print("\n===== 30-Day Vol Target Overlay (50% target) =====")
