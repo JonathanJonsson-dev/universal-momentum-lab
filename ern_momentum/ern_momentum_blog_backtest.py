@@ -401,7 +401,7 @@ def load_market_data() -> Tuple[pd.DataFrame, pd.Series, Dict[str, str]]:
 
 def realized_vol(series: pd.Series, window: int) -> pd.Series:
     return series.rolling(window=window).std() * math.sqrt(252)
-
+    #return series.ewm(span=window, adjust=False, min_periods=window).std(bias=False) * math.sqrt(252)
 
 def apply_vol_target_overlay(
     base_returns: pd.Series,
