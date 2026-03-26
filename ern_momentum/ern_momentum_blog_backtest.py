@@ -445,6 +445,7 @@ def run_backtest() -> BacktestResult:
     weights = allocate_weights(momentum_scores)
     # Apply a one-month lag: month-end signals set next month's weights.
     weights = weights.shift(1).dropna()
+    idm_series = compute_idm_series(daily_prices, weights, corr_window=30)
 
     asset_returns = asset_returns.loc[weights.index]
     cash_returns = cash_returns.loc[weights.index]
@@ -495,6 +496,7 @@ def run_backtest() -> BacktestResult:
         extras={
             "proxies": proxies,
             "momentum_scores": momentum_scores,
+            "idm": idm_series,
             "coverage": (
                 portfolio_returns.index.min().date(),
                 portfolio_returns.index.max().date(),
@@ -660,6 +662,73 @@ def plot_scaling(result: BacktestResult, outfile: Path | None = None) -> Path | 
     return outfile
 
 
+def plot_idm(result: BacktestResult, outfile: Path | None = None) -> Path | None:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib not installed; skipping IDM plot.")
+        return None
+
+    outfile = OUTPUT_DIR / "ern_momentum_idm.png" if outfile is None else outfile
+    idm = result.extras.get("idm")
+    if not isinstance(idm, pd.Series) or idm.empty:
+        print("No IDM series available; skipping IDM plot.")
+        return None
+
+    idm = idm.dropna()
+    if idm.empty:
+        print("IDM series empty after dropna; skipping IDM plot.")
+        return None
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    idm.plot(ax=ax)
+    ax.set_title("Instrument Diversification Multiplier")
+    ax.set_ylabel("IDM")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(outfile, dpi=150)
+    plt.close(fig)
+    return outfile
+
+
+def compute_idm_series(
+    daily_prices: pd.DataFrame,
+    monthly_weights: pd.DataFrame,
+    corr_window: int = 30,
+) -> pd.Series:
+    assets = ["EQUITY", "BONDS", "GOLD"]
+
+    rets = daily_prices[assets].pct_change().dropna()
+    corr = rets.rolling(corr_window).corr()
+
+    def calc_idm(dt, w):
+        if dt not in corr.index.get_level_values(0):
+            return np.nan
+
+        H = corr.loc[dt].clip(lower=0).values
+        if np.isnan(H).any():
+            return np.nan
+
+        w = np.asarray(w, dtype=float)
+        if w.sum() <= 0:
+            return np.nan
+
+        w = w / w.sum()
+        return 1.0 / np.sqrt(w @ H @ w)
+
+    idm = []
+    for dt, row in monthly_weights[assets].iterrows():
+        # use the last available daily correlation estimate on or before the month-end weight date
+        eligible_dates = corr.index.get_level_values(0)
+        eligible_dates = eligible_dates[eligible_dates <= dt]
+        if len(eligible_dates) == 0:
+            idm.append(np.nan)
+            continue
+        corr_dt = eligible_dates.max()
+        idm.append(calc_idm(corr_dt, row.values))
+
+    return pd.Series(idm, index=monthly_weights.index, name="idm")
+
 def main() -> None:
     result = run_backtest()
     start, end = result.extras["coverage"]
@@ -675,6 +744,10 @@ def main() -> None:
     # Print the 20 last weights
     print("\nLast 20 months of weights:")
     print(result.weights.tail(200).round(3))
+    idm = result.extras.get("idm")
+    if isinstance(idm, pd.Series):
+        print("\nInstrument Diversification Multiplier (IDM):")
+        print(idm.tail().round(3))
     
     vt_info = result.extras.get("vol_target")
     if vt_info:
@@ -701,6 +774,9 @@ def main() -> None:
     scaling_path = plot_scaling(result)
     if scaling_path:
         print(f"Saved scaling plot to {scaling_path}")
+    idm_path = plot_idm(result)
+    if idm_path:
+        print(f"Saved IDM plot to {idm_path}")
 
 
 if __name__ == "__main__":
