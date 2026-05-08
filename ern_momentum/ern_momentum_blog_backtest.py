@@ -445,7 +445,7 @@ def run_backtest() -> BacktestResult:
     weights = allocate_weights(momentum_scores)
     # Apply a one-month lag: month-end signals set next month's weights.
     weights = weights.shift(1).dropna()
-    idm_series = compute_idm_series(daily_prices, weights, corr_window=30)
+    idm_series = compute_idm_series(daily_prices, weights, corr_window=120)
 
     asset_returns = asset_returns.loc[weights.index]
     cash_returns = cash_returns.loc[weights.index]
@@ -777,7 +777,12 @@ def main() -> None:
     idm_path = plot_idm(result)
     if idm_path:
         print(f"Saved IDM plot to {idm_path}")
-
+        
+    # Save strategy returns to CSV
+    strategy_returns = result.returns
+    csv_path = OUTPUT_DIR / "ern_momentum_strategy_returns.csv"
+    strategy_returns.to_csv(csv_path)
+    print(f"\nSaved strategy returns to {csv_path}")
 
 if __name__ == "__main__":
     main()
