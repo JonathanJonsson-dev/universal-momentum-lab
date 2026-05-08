@@ -507,6 +507,7 @@ def run_backtest() -> BacktestResult:
                 "scaling": vt_scaling,
                 "metrics": vt_metrics,
             },
+            "daily_strategy_returns": daily_strategy_returns,
         },
     )
 
@@ -779,7 +780,7 @@ def main() -> None:
         print(f"Saved IDM plot to {idm_path}")
         
     # Save strategy returns to CSV
-    strategy_returns = result.returns
+    strategy_returns = result.extras.get("daily_strategy_returns")
     csv_path = OUTPUT_DIR / "ern_momentum_strategy_returns.csv"
     strategy_returns.to_csv(csv_path)
     print(f"\nSaved strategy returns to {csv_path}")
