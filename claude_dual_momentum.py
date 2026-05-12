@@ -13,7 +13,7 @@ Data: Downloaded automatically via yfinance (free, no API key needed).
       Tickers map to the closest liquid ETF/index proxies for each future.
 
 Requirements:
-    pip install yfinance pandas numpy matplotlib seaborn
+    pip install yfinance pandas numpy matplotlib
 """
 
 import warnings
@@ -25,13 +25,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.dates as mdates
-import seaborn as sns
 from datetime import datetime
 
 # ─────────────────────────────────────────────
 # CONFIGURATION
 # ─────────────────────────────────────────────
-START_DATE        = "2005-01-01"   # backtest start
+START_DATE        = "1950-01-01"   # backtest start
 END_DATE          = datetime.today().strftime("%Y-%m-%d")
 LOOKBACK_MONTHS   = 12             # momentum lookback
 INITIAL_CAPITAL   = 100_000        # USD
@@ -39,18 +38,19 @@ TRANSACTION_COST  = 0.00          # 0.1% per trade (round-trip 0.2%)
 
 # IG Markets index futures → closest liquid proxy tickers
 FUTURES_UNIVERSE = {
-    "SP500":       "^GSPC",
-    "Nasdaq":      "^NDX",
-    "DAX":         "^GDAXI",
-    "FTSE 100":    "^FTSE",
-    "Nikkei 225":  "^N225",
-    "Hang Seng":   "^HSI",
-    "ASX 200":     "^AXJO",
-    "Euro Stoxx":  "^STOXX50E",
+    "SP500":       "ES=F",
+    # "Nasdaq":      "^NDX",
+    # "DAX":         "^GDAXI",
+    # "FTSE 100":    "^FTSE",
+    # "Nikkei 225":  "^N225",
+    # "Hang Seng":   "^HSI",
+    # "ASX 200":     "^AXJO",
+    # "Euro Stoxx":  "^STOXX50E",
+    "Non-US":      "IEFA",
 }
 
-BONDS_TICKER  = "TLT"   # iShares 20+ Year Treasury Bond ETF (safe harbor)
-SP500_TICKER  = "^GSPC" # absolute momentum benchmark
+BONDS_TICKER  = "ZB=F"   # iShares 20+ Year Treasury Bond ETF (safe harbor)
+SP500_TICKER  = "ES=F" # absolute momentum benchmark
 
 # ─────────────────────────────────────────────
 # 1. DOWNLOAD DATA
@@ -59,7 +59,7 @@ def download_data():
     print("Downloading price data via yfinance…")
     all_tickers = list(set(FUTURES_UNIVERSE.values())) + [BONDS_TICKER]
     raw = yf.download(all_tickers, start=START_DATE, end=END_DATE,
-                      auto_adjust=True, progress=False)["Close"]
+                      auto_adjust=False, progress=False)["Close"]
 
     # Rename columns: ticker → friendly name
     reverse_map = {v: k for k, v in FUTURES_UNIVERSE.items()}
@@ -278,7 +278,7 @@ def plot_results(results: pd.DataFrame, sp500_eq: pd.Series,
     ax3.set_facecolor(PANEL)
     ax3.set_title("Holdings Distribution", color=TEXT, fontsize=11, fontweight="bold", pad=8)
     counts = results["holding"].value_counts()
-    colors = sns.color_palette("cool", len(counts))
+    colors = plt.cm.cool(np.linspace(0, 1, len(counts)))
     wedges, texts, autotexts = ax3.pie(
         counts.values, labels=counts.index, autopct="%1.1f%%",
         colors=colors, startangle=140,
@@ -321,10 +321,15 @@ def plot_results(results: pd.DataFrame, sp500_eq: pd.Series,
     monthly_ret = s.pct_change() * 100
     heat = monthly_ret.groupby([monthly_ret.index.year, monthly_ret.index.month]).first().unstack()
     heat.columns = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-    sns.heatmap(heat, ax=ax6, cmap="RdYlGn", center=0,
-                annot=True, fmt=".1f", annot_kws={"size": 6},
-                linewidths=0.3, linecolor=DARK,
-                cbar_kws={"shrink": 0.8})
+    im = ax6.imshow(heat, aspect="auto", cmap="RdYlGn", vmin=-heat.abs().max().max(), vmax=heat.abs().max().max())
+    ax6.set_xticks(range(len(heat.columns)))
+    ax6.set_xticklabels(heat.columns, fontsize=7)
+    ax6.set_yticks(range(len(heat.index)))
+    ax6.set_yticklabels(heat.index, fontsize=7)
+    for i in range(len(heat.index)):
+        for j in range(len(heat.columns)):
+            ax6.text(j, i, f"{heat.iloc[i, j]:.1f}", ha="center", va="center", size=6, color="black" if abs(heat.iloc[i, j]) < heat.abs().max().max()/2 else "white")
+    plt.colorbar(im, ax=ax6, shrink=0.8)
     ax6.tick_params(colors=TEXT, labelsize=7)
     ax6.xaxis.tick_top()
     ax6.xaxis.set_label_position("top")
