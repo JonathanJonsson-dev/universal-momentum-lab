@@ -34,7 +34,7 @@ BASE_WEIGHTS = {"EQUITY": 0.70, "BONDS": 0.20, "GOLD": 0.10}
 EXPENSE_RATIOS = {"EQUITY": 0.0003, "BONDS": 0.0015, "GOLD": 0.0009, "CASH": 0.0009}
 TRANSACTION_COST = 0.0003  # 0.03% per side on traded weight
 VOL_TARGET = 0.50
-VOL_WINDOW_DAYS = 30
+VOL_WINDOW_DAYS = 32.33  # Carver's optimal volatility forecasting window for daily data
 VOL_MAX_LEVERAGE = 11.2
 OUTPUT_DIR = Path(__file__).resolve().parent / "plots"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -400,8 +400,11 @@ def load_market_data() -> Tuple[pd.DataFrame, pd.Series, Dict[str, str]]:
 
 
 def realized_vol(series: pd.Series, window: int) -> pd.Series:
-    return series.rolling(window=window).std() * math.sqrt(252)
-    #return series.ewm(span=window, adjust=False, min_periods=window).std(bias=False) * math.sqrt(252)
+    #return series.rolling(window=window).std() * math.sqrt(252)
+    # λ = 0.06 → span ≈ 32.33 (Carver's optimal for volatility forecasting)
+     # Optimal λ = 0.06 for volatility forecasting (Carver 2017)
+    # span = 2/λ - 1 ≈ 32.33
+    return series.ewm(span=window, adjust=False, min_periods=window).std(bias=False) * math.sqrt(252)
 
 def apply_vol_target_overlay(
     base_returns: pd.Series,
