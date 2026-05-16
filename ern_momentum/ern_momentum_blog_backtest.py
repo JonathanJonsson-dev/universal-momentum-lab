@@ -422,7 +422,7 @@ def apply_vol_target_overlay(
     scaling = scaling.replace([np.inf, -np.inf], np.nan)
     scaling = scaling.clip(lower=0.0, upper=max_leverage)
     scaling = scaling.fillna(1.0)
-    overlay = scaling * base_returns + (1.0 - scaling) * rf_aligned
+    overlay = scaling * base_returns + (1.0 - scaling) * rf_aligned # (1.0 - scaling) * rf_aligned: This represents the portion of your portfolio allocated to cash (risk-free asset).
     overlay.name = "vol_target_daily"
     return overlay, scaling
 
