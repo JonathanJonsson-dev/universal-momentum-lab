@@ -788,11 +788,32 @@ def adahedge_vol_targeting(daily_strategy_returns: pd.Series):
 
     weighted_probability_df = pd.DataFrame(probabilities[1:], index=returns_df.index, columns=[str(t) for t in vol_targets])
     
-        # Calculate the weighted average of vol targets
+    # Calculate the weighted average of vol targets
     weighted_vol_target = weighted_probability_df.multiply(vol_targets).sum(axis=1)
     print(weighted_vol_target)
+    plot = weighted_vol_target.plot(title="AdaHedge Weighted Vol Target", figsize=(10, 4))
+    plot.set_ylabel("Weighted Vol Target")
+    plot.set_xlabel("Date")
+    # Save the plot
+    plot_path = OUTPUT_DIR / "adahedge_weighted_vol_target.png"
+    plot.get_figure().savefig(plot_path, dpi=150)
+    
+    F = weighted_vol_target / rolling_vol.loc[weighted_vol_target.index]
+    F_shifted = F.shift(1)
+
+    # Calculate daily returns (already scaled by F)
+    scaled_returns = F_shifted * daily_strategy_returns.loc[F_shifted.index]
+
+    # Annualized statistics
+    mean_return = scaled_returns.mean() * 252
+    std_return = scaled_returns.std() * math.sqrt(252)
+    sharpe_ratio = mean_return / std_return
+
+    print(f"AdaHedge Vol Targeting Sharpe Ratio: {sharpe_ratio:.3f}")
+    print(f"AdaHedge Vol Targeting Mean Return: {mean_return:.3f}")
+    print(f"AdaHedge Vol Targeting Std Return: {std_return:.3f}")
+
     return weighted_vol_target
-    #initial_weights = np.full(len(vol_targets), 1/len(vol_targets))
 
 def main() -> None:
     result = run_backtest()
