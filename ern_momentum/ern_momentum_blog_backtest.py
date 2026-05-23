@@ -733,8 +733,70 @@ def compute_idm_series(
 
     return pd.Series(idm, index=monthly_weights.index, name="idm")
 
+def adahedge_vol_targeting(daily_strategy_returns: pd.Series):
+    """AdaHedge algorithm for combining N experts based on their returns."""
+    rolling_vol = daily_strategy_returns.rolling(window=32).std() * math.sqrt(252)
+    vol_targets = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+
+    # Initialize DataFrame with index from original returns
+    returns_df = pd.DataFrame(index=daily_strategy_returns.index)
+
+    for target in vol_targets:
+        scaling = (target / rolling_vol).shift(1)  # Shift to avoid look-ahead bias
+        scaled_returns = scaling * daily_strategy_returns
+        returns_df[str(target)] = scaled_returns  # Add as column
+
+    # Drop rows with NaN values (initial periods where rolling volatility isn't available)
+    returns_df = returns_df.dropna()
+
+    N = len(vol_targets)  # Number of experts
+    T = len(returns_df)
+    weights = [1.0] * N  # Initialize weights uniformly
+    sum_squared_losses = 0.0
+    probabilities = []
+    algorithm_losses = []
+
+    # Initial probabilities (uniform)
+    prob = [1.0 / N] * N
+    probabilities.append(prob.copy())
+
+    # Iterate through the DataFrame using datetime index
+    for t in range(T):
+        current_row = returns_df.iloc[t]
+        # Calculate losses (negative returns)
+        losses = [-r for r in current_row]
+
+        # Algorithm's loss for this time step
+        L_t = sum(prob[i] * losses[i] for i in range(N))
+        algorithm_losses.append(L_t)
+
+        # Update sum of squared losses
+        for loss in losses:
+            sum_squared_losses += loss ** 2
+
+        # Adaptive learning rate
+        eta_t = math.log(N) / math.sqrt(sum_squared_losses) if sum_squared_losses > 0 else 0.0
+
+        # Update weights
+        for i in range(N):
+            weights[i] *= math.exp(-eta_t * losses[i])
+
+        # Normalize weights to get probabilities for next step
+        total_weight = sum(weights)
+        prob = [w / total_weight for w in weights] if total_weight > 0 else [1.0 / N] * N
+        probabilities.append(prob.copy())
+
+    weighted_probability_df = pd.DataFrame(probabilities[1:], index=returns_df.index, columns=[str(t) for t in vol_targets])
+    
+        # Calculate the weighted average of vol targets
+    weighted_vol_target = weighted_probability_df.multiply(vol_targets).sum(axis=1)
+    print(weighted_vol_target)
+    return weighted_vol_target
+    #initial_weights = np.full(len(vol_targets), 1/len(vol_targets))
+
 def main() -> None:
     result = run_backtest()
+    adahedge_vol_targeting(result.extras.get("daily_strategy_returns"))
     start, end = result.extras["coverage"]
     print("===== ERN Momentum Allocation Backtest =====")
     print(f"Sample covers {start} -> {end}")
