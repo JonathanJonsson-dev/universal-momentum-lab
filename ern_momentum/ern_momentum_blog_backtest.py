@@ -736,7 +736,7 @@ def compute_idm_series(
 def adahedge_vol_targeting(daily_strategy_returns: pd.Series):
     """AdaHedge algorithm for combining N experts based on their returns."""
     rolling_vol = daily_strategy_returns.rolling(window=32).std() * math.sqrt(252)
-    vol_targets = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    vol_targets = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0]
 
     # Initialize DataFrame with index from original returns
     returns_df = pd.DataFrame(index=daily_strategy_returns.index)
@@ -764,15 +764,19 @@ def adahedge_vol_targeting(daily_strategy_returns: pd.Series):
     for t in range(T):
         current_row = returns_df.iloc[t]
         # Calculate losses (negative returns)
-        losses = [-r for r in current_row]
+        #losses = [-r for r in current_row]
+        # Use log-utility loss (penalizes both direction and variance)
+        losses = [-math.log(max(1 + r, 1e-8)) for r in current_row]
 
-        # Algorithm's loss for this time step
+        # Algorithm's own loss only
         L_t = sum(prob[i] * losses[i] for i in range(N))
         algorithm_losses.append(L_t)
 
         # Update sum of squared losses
-        for loss in losses:
-            sum_squared_losses += loss ** 2
+        # for loss in losses:
+        #     sum_squared_losses += loss ** 2
+        # Accumulate only algo's squared loss
+        sum_squared_losses += L_t ** 2 
 
         # Adaptive learning rate
         eta_t = math.log(N) / math.sqrt(sum_squared_losses) if sum_squared_losses > 0 else 0.0
@@ -815,9 +819,128 @@ def adahedge_vol_targeting(daily_strategy_returns: pd.Series):
 
     return weighted_vol_target
 
+def rolling_sharpe_vol_targeting(daily_strategy_returns: pd.Series, lookback: int = 252) -> pd.Series:
+    """
+    Pick the vol target with the best Sharpe ratio over a trailing window.
+    """
+    rolling_vol = daily_strategy_returns.rolling(window=32).std() * math.sqrt(252)
+    vol_targets = [0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0]
+
+    returns_df = pd.DataFrame(index=daily_strategy_returns.index)
+    for target in vol_targets:
+        scaling = (target / rolling_vol).shift(1)
+        returns_df[str(target)] = scaling * daily_strategy_returns
+    returns_df = returns_df.dropna()
+
+    def best_sharpe_target(window_returns):
+        sharpes = window_returns.mean() / window_returns.std()
+        best = sharpes.idxmax()
+        return float(best)
+
+    # Roll over the lookback window, picking best target each day
+    chosen_targets = []
+    for t in range(len(returns_df)):
+        if t < lookback:
+            chosen_targets.append(np.nan)
+            continue
+        window = returns_df.iloc[t - lookback:t]
+        chosen_targets.append(best_sharpe_target(window))
+
+    chosen_series = pd.Series(chosen_targets, index=returns_df.index)
+
+    # Apply the chosen target: scale tomorrow's return by chosen / rolling_vol
+    F = chosen_series / rolling_vol.loc[chosen_series.index]
+    F_shifted = F.shift(1)
+    scaled_returns = (F_shifted * daily_strategy_returns.loc[F_shifted.index]).dropna()
+
+    mean_return = scaled_returns.mean() * 252
+    std_return = scaled_returns.std() * math.sqrt(252)
+    sharpe_ratio = mean_return / std_return
+    print(f"Rolling Sharpe Vol Targeting Sharpe Ratio: {sharpe_ratio:.3f}")
+    print(f"Rolling Sharpe Vol Targeting Mean Return:  {mean_return:.3f}")
+    print(f"Rolling Sharpe Vol Targeting Std Return:   {std_return:.3f}")
+
+    return chosen_series
+
+
+def adahedge_fixed_share_vol_targeting(daily_strategy_returns: pd.Series, alpha: float = 0.01) -> pd.Series:
+    """
+    AdaHedge with fixed-share mixing (forgetting) to handle non-stationarity.
+    alpha: mixing rate — fraction of weight redistributed uniformly each step.
+           Higher alpha = more forgetting. Typical range: 0.005 to 0.05.
+    """
+    rolling_vol = daily_strategy_returns.rolling(window=32).std() * math.sqrt(252)
+    vol_targets = [0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0]
+
+    returns_df = pd.DataFrame(index=daily_strategy_returns.index)
+    for target in vol_targets:
+        scaling = (target / rolling_vol).shift(1)
+        returns_df[str(target)] = scaling * daily_strategy_returns
+    returns_df = returns_df.dropna()
+
+    N = len(vol_targets)
+    T = len(returns_df)
+    weights = [1.0] * N
+    sum_squared_losses = 0.0
+    probabilities = []
+    prob = [1.0 / N] * N
+    probabilities.append(prob.copy())
+
+    for t in range(T):
+        current_row = returns_df.iloc[t]
+
+        # Log-utility loss
+        losses = [-math.log(max(1 + r, 1e-8)) for r in current_row]
+
+        # Algorithm's own loss
+        L_t = sum(prob[i] * losses[i] for i in range(N))
+
+        # Accumulate only algo's squared loss
+        sum_squared_losses += L_t ** 2
+
+        # Adaptive learning rate
+        eta_t = math.log(N) / math.sqrt(sum_squared_losses) if sum_squared_losses > 0 else 0.0
+
+        # Update weights
+        for i in range(N):
+            weights[i] *= math.exp(-eta_t * losses[i])
+
+        # Normalize
+        total_weight = sum(weights)
+        prob = [w / total_weight for w in weights] if total_weight > 0 else [1.0 / N] * N
+
+        # Fixed-share mixing: redistribute alpha fraction uniformly
+        prob = [(1 - alpha) * p + alpha / N for p in prob]
+
+        # Sync weights back to match mixed probabilities (keeps eta scaling consistent)
+        weights = [p * total_weight for p in prob]
+
+        probabilities.append(prob.copy())
+
+    weighted_probability_df = pd.DataFrame(
+        probabilities[1:], index=returns_df.index, columns=[str(t) for t in vol_targets]
+    )
+    weighted_vol_target = weighted_probability_df.multiply(vol_targets).sum(axis=1)
+
+    F = weighted_vol_target / rolling_vol.loc[weighted_vol_target.index]
+    F_shifted = F.shift(1)
+    scaled_returns = (F_shifted * daily_strategy_returns.loc[F_shifted.index]).dropna()
+
+    mean_return = scaled_returns.mean() * 252
+    std_return = scaled_returns.std() * math.sqrt(252)
+    sharpe_ratio = mean_return / std_return
+    print(f"AdaHedge Fixed-Share Sharpe Ratio: {sharpe_ratio:.3f}")
+    print(f"AdaHedge Fixed-Share Mean Return:  {mean_return:.3f}")
+    print(f"AdaHedge Fixed-Share Std Return:   {std_return:.3f}")
+
+    return weighted_vol_target
+
 def main() -> None:
     result = run_backtest()
-    adahedge_vol_targeting(result.extras.get("daily_strategy_returns"))
+    #adahedge_vol_targeting(result.extras.get("daily_strategy_returns"))
+    #rolling_sharpe_vol_targeting(result.extras.get("daily_strategy_returns"))
+    #adahedge_fixed_share_vol_targeting(result.extras.get("daily_strategy_returns"), alpha=0.01)
+    
     start, end = result.extras["coverage"]
     print("===== ERN Momentum Allocation Backtest =====")
     print(f"Sample covers {start} -> {end}")
