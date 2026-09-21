@@ -961,7 +961,7 @@ def main() -> None:
     
     vt_info = result.extras.get("vol_target")
     if vt_info:
-        print("\n===== 30-Day Vol Target Overlay (50% target) =====")
+        print("\n===== 30-Day Vol Target Overlay ({:.2f}% target) =====".format(VOL_TARGET * 100))
         print(format_metrics(vt_info["metrics"]))
         scaling = vt_info["scaling"].dropna()
         if not scaling.empty:
