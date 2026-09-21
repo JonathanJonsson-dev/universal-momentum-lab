@@ -33,7 +33,7 @@ HORIZONS = [8, 9, 10]
 BASE_WEIGHTS = {"EQUITY": 0.70, "BONDS": 0.20, "GOLD": 0.10}
 EXPENSE_RATIOS = {"EQUITY": 0.0003, "BONDS": 0.0015, "GOLD": 0.0009, "CASH": 0.0009}
 TRANSACTION_COST = 0.0003  # 0.03% per side on traded weight
-VOL_TARGET = 0.50
+VOL_TARGET = (0.079*5.14)/2 #0.50
 VOL_WINDOW_DAYS = 32.33  # Carver's optimal volatility forecasting window for daily data
 VOL_MAX_LEVERAGE = 11.2
 OUTPUT_DIR = Path(__file__).resolve().parent / "plots"
@@ -993,6 +993,9 @@ def main() -> None:
     csv_path = OUTPUT_DIR / "ern_momentum_strategy_returns.csv"
     strategy_returns.to_csv(csv_path)
     print(f"\nSaved strategy returns to {csv_path}")
+    print("Mean annual daily return: {:.5f}".format(round(strategy_returns.mean() * 252, 5)))
+    print("Std annual daily return: {:.5f}".format(round(strategy_returns.std() * math.sqrt(252), 5)))
+    print("Sharpe ratio (annual): {:.3f}".format(round(strategy_returns.mean() / strategy_returns.std() * math.sqrt(252), 3)))
 
 if __name__ == "__main__":
     main()
