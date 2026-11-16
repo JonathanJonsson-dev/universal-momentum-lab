@@ -7,7 +7,10 @@ Key assumptions pulled from the post:
   per asset. Equity uses a 2-month front average in the rolling-average signal.
 * Base weights 70/20/10 (Equity/Bonds/Gold). Unused Gold weight flows to Equity,
   unused Equity flows to Bonds, and remaining weight lands in Cash.
-* Annual expense ratios: 0.03% Equity, 0.15% Bonds, 0.09% Gold, 0.09% Cash.
+* Annual expense ratios: 0.03% Equity, 0.15% Bonds, 0.09% Gold, 0.09% Cash
+  (the blog's example funds: IVV/VOO, IEF, IAUM, SGOV). ETF proxy prices already
+  have the proxy fund's own fee taken out, so it is added back before these are
+  charged; each asset pays the blog's ratio exactly once.
   Transaction cost drag: 0.03% per side on traded weight.
 
 This script downloads the longest available proxies from Yahoo Finance and
@@ -32,6 +35,19 @@ END_DATE = datetime.today().strftime("%Y-%m-%d")
 HORIZONS = [8, 9, 10]
 BASE_WEIGHTS = {"EQUITY": 0.70, "BONDS": 0.20, "GOLD": 0.10}
 EXPENSE_RATIOS = {"EQUITY": 0.0003, "BONDS": 0.0015, "GOLD": 0.0009, "CASH": 0.0009}
+# Annual fees already inside the Yahoo prices of the fund proxies (current published
+# expense ratios). They are added back so each asset pays EXPENSE_RATIOS exactly once.
+# Index, futures and yield proxies (^SP500TR, ^GSPC, GC=F, ^IRX) carry no fund fee.
+PROXY_FUND_FEES = {
+    "SPY": 0.000945,
+    "IEF": 0.0015,
+    "GOVT": 0.0005,
+    "TLT": 0.0015,
+    "GLD": 0.0040,
+    "IAU": 0.0025,
+    "BIL": 0.001356,
+    "SHV": 0.0015,
+}
 TRANSACTION_COST = 0.0003  # 0.03% per side on traded weight
 VOL_TARGET = 0.595 / 2 
 VOL_WINDOW_DAYS = 32.33  # Carver's optimal volatility forecasting window for daily data
@@ -51,6 +67,12 @@ CASH_PROXIES: List[Tuple[str, str]] = [
     ("SHV", "price"),  # short Treasuries
     ("^IRX", "yield"),  # 13-week T-Bill yield (annualized percent)
 ]
+
+# First-choice ticker per asset; the fee helpers assume these when no proxies are passed.
+DEFAULT_PROXIES: Dict[str, str] = {
+    **{asset: next(iter(config["tickers"])) for asset, config in ASSET_CONFIG.items()},
+    "CASH": CASH_PROXIES[0][0],
+}
 
 
 @dataclass
@@ -256,28 +278,50 @@ def allocate_weights(momentum_scores: pd.DataFrame) -> pd.DataFrame:
     return weights
 
 
-def apply_expense_drag(asset_returns: pd.DataFrame, cash_returns: pd.Series) -> Tuple[pd.DataFrame, pd.Series]:
+def net_expense_ratios(proxies: Dict[str, str] | None = None) -> Dict[str, float]:
+    """Annual fee to subtract per asset: the blog's ratio minus the proxy's own fund fee.
+
+    `proxies` maps each asset to the ticker that was loaded (see load_market_data) and
+    defaults to the first-choice tickers. A negative value means the proxy fund charges
+    more than the blog assumes (e.g. GLD 0.40% vs. 0.09% for gold), so returns go up.
+    """
+    proxies = DEFAULT_PROXIES if proxies is None else proxies
+    return {
+        asset: ratio - PROXY_FUND_FEES.get(proxies.get(asset, ""), 0.0)
+        for asset, ratio in EXPENSE_RATIOS.items()
+    }
+
+
+def apply_expense_drag(
+    asset_returns: pd.DataFrame,
+    cash_returns: pd.Series,
+    proxies: Dict[str, str] | None = None,
+) -> Tuple[pd.DataFrame, pd.Series]:
+    ratios = net_expense_ratios(proxies)
     adjusted = asset_returns.copy()
-    for asset, ratio in EXPENSE_RATIOS.items():
+    for asset, ratio in ratios.items():
         if asset == "CASH":
             continue
         if asset in adjusted:
             adjusted[asset] = adjusted[asset] - ratio / 12.0
-    cash_net = cash_returns - EXPENSE_RATIOS["CASH"] / 12.0
+    cash_net = cash_returns - ratios["CASH"] / 12.0
     cash_net.name = "CASH"
     return adjusted, cash_net
 
 
 def apply_expense_drag_daily(
-    asset_returns: pd.DataFrame, cash_returns: pd.Series
+    asset_returns: pd.DataFrame,
+    cash_returns: pd.Series,
+    proxies: Dict[str, str] | None = None,
 ) -> Tuple[pd.DataFrame, pd.Series]:
+    ratios = net_expense_ratios(proxies)
     adjusted = asset_returns.copy()
-    for asset, ratio in EXPENSE_RATIOS.items():
+    for asset, ratio in ratios.items():
         if asset == "CASH":
             continue
         if asset in adjusted:
             adjusted[asset] = adjusted[asset] - ratio / 252.0
-    cash_net = cash_returns - EXPENSE_RATIOS["CASH"] / 252.0
+    cash_net = cash_returns - ratios["CASH"] / 252.0
     cash_net.name = "CASH"
     return adjusted, cash_net
 
@@ -453,7 +497,7 @@ def run_backtest() -> BacktestResult:
     asset_returns = asset_returns.loc[weights.index]
     cash_returns = cash_returns.loc[weights.index]
 
-    asset_returns, cash_returns = apply_expense_drag(asset_returns, cash_returns)
+    asset_returns, cash_returns = apply_expense_drag(asset_returns, cash_returns, proxies)
 
     portfolio_returns = compute_portfolio_returns(weights, asset_returns, cash_returns)
     metrics = compute_metrics(portfolio_returns, cash_returns)
@@ -471,7 +515,7 @@ def run_backtest() -> BacktestResult:
     daily_cash_returns = daily_cash_returns.loc[daily_asset_returns.index]
 
     daily_asset_returns, daily_cash_net = apply_expense_drag_daily(
-        daily_asset_returns, daily_cash_returns
+        daily_asset_returns, daily_cash_returns, proxies
     )
     daily_strategy_returns = build_daily_strategy_returns(
         weights,
